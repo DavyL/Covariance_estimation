@@ -1,0 +1,223 @@
+---
+title: "Covariance estimation"
+author: "Davy Leo"
+date: "2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(igraph)
+#install.packages("huge")
+library(huge) # contain Glasso and many others estimations for covariance and precision matrix
+# the package already includes MASS and igraph packages
+#set.seed(41) # to have a good estimation at the end
+library(shapes)#contains distcov to compute distance between covariance in an intrinsic way
+```
+
+
+We simulate some data.
+
+```{r simulation}
+p <- 10
+smallw <- c(0.5,0,-1,0,0,0.4, rep(0, p-7))
+W <- matrix(0,nrow=p,ncol=p)
+W[row(W)>col(W)] <- smallw
+W <- (W+t(W))
+diag(W) <- 5
+cat('matrix W :\n')
+  round(W,2)
+  cat('\n')
+  cat(W)
+n <- 10
+x <- mvrnorm(n,rep(0,p), W)
+```
+We compute the sample covariance matrix of a single matrix, assuming mean = 0
+```{r}
+S <- (1/n)*t(x)%*%x
+#S<-cov(x)
+round(S,2)
+cat(norm(S - W, "F"))
+
+x <- mvrnorm(5,rep(0,p), W)
+SLasso_res <- huge.glasso(x, lambda = sqrt(log(p)/n), cov.output=TRUE)
+SLasso <- SLasso_res$icov[[1]]
+round(SLasso,2)
+```
+We plot the observed error of the sample covariance and the lasso covariance estimate on a number of simulations
+```{r}
+##compute_errors() computes solutions with lasso and sample covariance to covariance estimation
+#it returns the value of the error between the exact solution target and the computed solutions
+#Errors function are LS/Lass(*) with Frobenius norm (F), spectral norm (2) and Riemannian distance (R)
+#LS is the sample covariance and Lass the lasso solution
+compute_errors <- function(target, n, index){
+  p<-ncol(target)
+  x <- mvrnorm(n, rep(0,p), target, empirical=TRUE)
+  S <- (1/n)*t(x)%*%x
+  SLasso_res <- huge.glasso(x, lambda = sqrt(log(p)/n), cov.output=TRUE)
+  SLasso <- SLasso_res$icov[[1]]
+#  Results$LSFrob[index] <- norm(S-target, "F")
+#  Results$LSSpectral[index] <- norm(S-target, "2")
+#  Results$LSRiem[index] <- distcov(S, target, "Riemannian")  
+  
+#  Results$LassFrob[index] <- norm(SLasso - target, "F")
+#  Results$LassSpectral[index] <- norm(SLasso - target, "2")
+#  Results$LassRiem[index] <- distcov(SLasso, target, "Riemannian")
+  
+  rbind(results, c(norm(S-target, "F"), norm(S-target, "2"),distcov(S, target, "Riemannian"), norm(SLasso - target, "F"), norm(SLasso - target, "2"), distcov(SLasso, target, "Riemannian") ))
+  print(results)
+}
+
+Nsim <- 10
+max_ratio <- 10
+results <- data.frame(matrix(ncol = 6, nrow = Nsim))
+colnames(results) <- c('SampCovFrob', 'SampCovSpec', 'SampCovRiem', 'LassCovFrob', 'LassCovSpec', 'LassCovRiem')
+results_varying_ratio <- data.frame(matrix(ncol = 6, nrow = max_ratio))
+colnames(results_varying_ratio) <- c('SampCovFrob', 'SampCovSpec', 'SampCovRiem', 'LassCovFrob', 'LassCovSpec', 'LassCovRiem')
+
+target<-W
+for(j in 1:max_ratio){
+  n <- p*j 
+  for(i in 1:Nsim){
+    x <- mvrnorm(n, rep(0,p), target)
+    S <- (1/n)*t(x)%*%x
+    SLasso_res <- huge.glasso(x, lambda = sqrt(log(p)/n), cov.output=TRUE)
+    SLasso <- SLasso_res$icov[[1]]
+  #  Results$LSFrob[index] <- norm(S-target, "F")
+  #  Results$LSSpectral[index] <- norm(S-target, "2")
+  #  Results$LSRiem[index] <- distcov(S, target, "Riemannian")  
+  #  Results$LassFrob[index] <- norm(SLasso - target, "F")
+  #  Results$LassSpectral[index] <- norm(SLasso - target, "2")
+  #  Results$LassRiem[index] <- distcov(SLasso, target, "Riemannian")
+    
+    results[i,] <- c(norm(S-target, "F"), norm(S-target, "2"),distcov(S, target, "Riemannian"), norm(SLasso - target, "F"), norm(SLasso - target, "2"), distcov(SLasso, target, "Riemannian"))
+  }
+  results_varying_ratio[j,] <- c(mean(results$SampCovFrob),mean(results$SampCovSpec),mean(results$SampCovRiem),mean(results$LassCovFrob),mean(results$LassCovSpec),mean(results$LassCovRiem))
+}
+
+```
+```{r}
+#jpeg("estimate_errors_low_dim.jpg")
+ymax = max(results_varying_ratio)
+ymin = min(results_varying_ratio)
+
+plot(x=1:max_ratio, y=results_varying_ratio$SampCovFrob, ylim = c(ymin, ymax), ylab = "Error between estimate and target", xlab = "n/p", col="red", pch=1)
+points(x=1:max_ratio, y=results_varying_ratio$LassCovFrob, col="blue", pch=1)
+
+points(x=1:max_ratio, y=results_varying_ratio$SampCovSpec, col="red", pch=2)
+points(x=1:max_ratio, y=results_varying_ratio$LassCovSpec, col="blue", pch=2)
+
+points(x=1:max_ratio, y=results_varying_ratio$SampCovRiem, col="red", pch=3)
+points(x=1:max_ratio, y=results_varying_ratio$LassCovRiem, col="blue", pch=3)
+
+legend(x = max_ratio*0.9, y = 16, legend = c("Sample covariance", "Lasso", "Frob", "Spec", "Riem"), col = c("red", "blue", "black", "black", "black"), pch = c(10, 10, 1, 2, 3), ncol = 1)
+
+```
+
+```{r}
+breaklist <-c(Nsim/10, 10)
+breakmin <- max(breaklist, na.rm = FALSE)
+hist(results$SampCovFrob,main=paste("Samp Frobenius norm"), breaks= breakmin)
+hist(results$SampCovSpec,main=paste("Samp Spectral norm"), breaks=breakmin)
+hist(results$SampCovRiem,main=paste("Samp Riem dist"), breaks=breakmin)
+hist(results$LassCovFrob,main=paste("Lasso Frobenius norm"), breaks=breakmin)
+hist(results$LassCovSpec,main=paste("Lasso spectral norm"), breaks=breakmin)
+hist(results$LassCovRiem,main=paste("Lasso Riemannian distance"), breaks=breakmin)
+
+```
+
+
+We apply the Graphical Lasso procedure.
+
+```{r high lambda}
+lambda <- sqrt(log(p)/n)
+res <- huge.glasso(x, lambda = 100*lambda)
+What <- res$icov[[1]]
+
+cat('True precision matrix:\n')
+    round(W,2)
+    cat('\n')
+cat('Estimated precision matrix:\n')
+    round(What,2)
+    cat('\n')
+```
+
+We display the result.
+
+```{r fisrt graphs}
+A <- W
+diag(A) <- 0
+A <- (A!=0)
+Ahat <- What
+diag(Ahat) <- 0
+Ahat <- (Ahat!=0)
+
+par(mfrow=c(1,2))
+g <- graph_from_adjacency_matrix(A,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="True graph")
+g <- graph_from_adjacency_matrix(Ahat,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="Estimated graph")
+```
+
+This result was obtained with a given penalty weight $\lambda$. As we have a too sparse graph, we shall reduce $\lambda$.
+
+```{r small lambda}
+lambda <- 0.1*sqrt(log(p)/n)
+res <- huge.glasso(x, lambda = lambda)
+What <- res$icov[[1]]
+
+A <- W
+diag(A) <- 0
+A <- (A!=0)
+Ahat <- What
+diag(Ahat) <- 0
+Ahat <- (Ahat!=0)
+
+par(mfrow=c(1,2))
+g <- graph_from_adjacency_matrix(A,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="True graph")
+g <- graph_from_adjacency_matrix(Ahat,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="Estimated graph")
+
+```
+
+We can use a data-driven choice of the parameter $\lambda$.
+
+```{r select}
+res <- huge(x, method='glasso', verbose=FALSE)
+res.select <- huge.select(res, criterion='stars', verbose=FALSE) 
+```
+```{r, echo=FALSE }
+cat('Final value of the lambda: ', res.select$opt.lambda, '\n')
+cat(paste('Final value of the lambda: ', round(res.select$opt.lambda*sqrt(n/log(p)),3),'*sqrt(log(p)/n)'))
+```
+
+
+```{r final graphs}
+A <- W
+diag(A) <- 0
+A <- (A!=0)
+Ahat <- res.select$refit
+
+par(mfrow=c(1,2))
+g <- graph_from_adjacency_matrix(A,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="True graph")
+g <- graph_from_adjacency_matrix(Ahat,mode='undirected')
+plot(g, layout=layout.circle, edge.arrow.size=0.8,vertex.label.color = "black",
+     vertex.label.cex=1,vertex.size=20, vertex.color="white", edge.color="black",
+     main="Estimated graph")
+
+```
+
+It does not always work\dots
